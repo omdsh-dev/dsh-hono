@@ -1,9 +1,9 @@
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context as CordisContext } from '@deepseek-ai/cordis'
 import type { Context as HonoContext } from 'hono'
 import type { HostService, HostServiceInstance } from './index'
 
-export function getServerContext<Options>(source: HostService<Options> | HonoContext): Context {
-  return instanceOf(source).context
+export function getServerContext<Context = CordisContext>(source: HostService<any> | HonoContext): Context {
+  return instanceOf(source).context as Context
 }
 
 export function getServerOptions<Options>(source: HostService<Options> | HonoContext): Options {
