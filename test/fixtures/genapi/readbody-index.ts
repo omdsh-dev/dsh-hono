@@ -1,11 +1,11 @@
-import { defineWebServer } from 'dsh-h3'
-import { defineEventHandler, readBody } from 'h3'
+/* eslint-disable ts/explicit-function-return-type -- fixtures exercise inferred native Hono response types */
+import type { Context } from 'hono'
+import { defineWebServer } from '../../../src/index'
 
-const handler = defineEventHandler(async (event) => {
-  const body = await readBody<Record<string, string>>(event)
-  return { keys: body ? Object.keys(body).length : 0 }
-})
-
+async function handler(c: Context) {
+  const body = await c.req.json<Record<string, string>>()
+  return c.json({ keys: body ? Object.keys(body).length : 0 })
+}
 export const server = defineWebServer((app) => {
   app.post('/api/readbody-index', handler)
 })

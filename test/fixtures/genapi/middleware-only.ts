@@ -1,5 +1,7 @@
-import { defineWebServer } from 'dsh-h3'
+import { defineWebServer } from '../../../src/index'
 
 export const server = defineWebServer((app) => {
-  app.use(() => ({ middleware: true }))
+  app.use(async (_c, next) => {
+    await next()
+  })
 })

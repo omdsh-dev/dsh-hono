@@ -1,9 +1,10 @@
-import { defineEventHandler } from 'h3'
+/* eslint-disable ts/explicit-function-return-type -- fixtures exercise inferred native Hono response types */
+import type { Context } from 'hono'
 
-export const namedHandler = defineEventHandler(() => ({ named: true }))
-
-export function functionHandler(): { fromFunction: boolean } {
-  return { fromFunction: true }
+export const namedHandler = (c: Context) => c.json(({ named: true }))
+export function functionHandler(c: Context) {
+  return c.json({ fromFunction: true } as {
+    fromFunction: boolean
+  })
 }
-
-export default defineEventHandler(() => ({ fromDefault: true }))
+export default (c: Context) => c.json(({ fromDefault: true }))

@@ -15,7 +15,8 @@ function generate(fixture: string): ApiPipeline.ConfigRead {
   return original(configRead)
 }
 
-describe('genapi definitions', () => {
+// Static TypeScript programs are slower under V8 coverage instrumentation.
+describe('genapi definitions', { timeout: 20_000 }, () => {
   it('names every definition after the route method and path', () => {
     const scope = generate('routes.ts').graphs.scopes.type
     expect(scope.typings.map(typing => typing.name)).toEqual([

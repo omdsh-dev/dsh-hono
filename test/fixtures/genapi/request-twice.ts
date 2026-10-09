@@ -1,11 +1,17 @@
-import { defineWebServer } from 'dsh-h3'
-import { defineEventHandler, getQuery } from 'h3'
+/* eslint-disable ts/explicit-function-return-type -- fixtures exercise inferred native Hono response types */
+import type { Context } from 'hono'
+import { defineWebServer } from '../../../src/index'
 
-const handler = defineEventHandler(event => ({
-  first: getQuery<{ a?: string }>(event),
-  second: getQuery<{ b?: string }>(event),
-}))
-
+function handler(c: Context) {
+  return c.json(({
+    first: c.req.query() as {
+      a?: string
+    },
+    second: c.req.query() as {
+      b?: string
+    },
+  }))
+}
 export const server = defineWebServer((app) => {
   app.get('/api/query-twice', handler)
 })

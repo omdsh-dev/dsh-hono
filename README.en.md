@@ -1,4 +1,4 @@
-# dsh-h3
+# dsh-hono
 
 [![npm version][npm-version-src]][npm-version-href]
 [![npm downloads][npm-downloads-src]][npm-downloads-href]
@@ -7,57 +7,54 @@
 [![coverage][coverage-src]][coverage-href]
 [![License][license-src]][license-href]
 
-⚡️ **dsh-h3** is for plugin authors only: it provides [h3](https://github.com/h3js/h3) route services for DeepSeek Harness plugins, with registration and disposal managed by Cordis.
+⚡️ **dsh-hono** is for plugin authors: it provides native Hono route services for DeepSeek Harness plugins, with registration and disposal managed by Cordis.
+
+[中文](<README.md>) · English
 
 ## 📦 Install
 
 ```sh
-pnpm add dsh-h3 h3
+pnpm add dsh-hono hono@4.13.13
 ```
 
 <details>
 <summary>Are you an AI?</summary>
 
-You can run <code>npx skills add omdsh-dev/dsh-h3 --skill dsh-h3 -y</code> to install the skills!
-
-Remember to ask your owner which <a href="https://github.com/vercel-labs/skills?tab=readme-ov-file#supported-agents">Agents</a> need to be supported (using the <code>--agent</code> parameter of skills) to avoid installing too many default <code>agents</code> directories.
+Run <code>npx skills add omdsh-dev/dsh-hono --skill dsh-hono -y</code> to install the skill. Ask your owner which agents need to be supported and use <code>--agent</code> to avoid installing unnecessary agent directories.
 
 </details>
 
 ## Features
 
-- **Native H3**: middleware, route params, sub-apps, route options, and chaining.
-- **Host routing**: native H3 string paths only, with host `exact`/`prefix` matching inferred internally.
-- **Context and options**: read the Context and options of the current activation, either outside the service or inside an [h3](https://github.com/h3js/h3) handler.
-- **Lifecycle cleanup**: unregister routes through a Cordis effect, and roll back this activation's changes when registration fails.
+- **Native Hono**: Context handlers, middleware, route parameters, sub-apps, and chaining.
+- **Host routing**: native string paths, with host `exact`/`prefix` matching inferred internally.
+- **Context and options**: access the Cordis Context and options of each activation from the service or a Hono Context.
+- **Lifecycle cleanup**: unregister through a Cordis effect; failed registrations roll back only their own changes.
 - **Reuse the host service**: uses `ctx.webServer`, starts no extra server, and takes no fallback slot.
 - **Client API**: statically generate request functions and types with GenAPI, without executing host code.
 
-> ⚠️ Uses H3 v2. The host must provide `webServer` before the plugin activates.
+> Uses Hono **4.13.13** and the official `@hono/node-server` adapter internally. The host must provide `webServer` before the plugin activates.
 
 ## 🚀 Quick start
 
 ### 1. Define and activate a route service
 
-Define a route service and activate it in the plugin's `apply` function:
-
 ```ts
 // src/host/server/routes/health.ts
-import { defineEventHandler } from 'h3'
+import type { Context } from 'hono'
 
-export const health = defineEventHandler(() => ({ status: 'ok' }))
+export const health = (c: Context) => c.json({ status: 'ok' })
 ```
 
 ```ts
-import { defineWebServer } from 'dsh-h3'
 // src/host/server/index.ts
-import { defineEventHandler } from 'h3'
+import { defineWebServer } from 'dsh-hono'
 import { health } from './routes/health'
 
 export const server = defineWebServer((app) => {
   app.get('/api/health', health)
-  app.get('/api/version', defineEventHandler(() => ({ version: '1.0.0' })))
-  app.get('/api/inspect/**', defineEventHandler(event => ({ path: event.url.pathname })))
+  app.get('/api/version', c => c.json({ version: '1.0.0' }))
+  app.get('/api/inspect/*', c => c.json({ path: c.req.path }))
 })
 ```
 
@@ -69,24 +66,19 @@ import { server } from './server'
 export const inject = ['webServer']
 
 export function apply(ctx: Context): void {
-  ctx.effect(() => server(ctx), 'custom-label')
+  ctx.effect(() => server(ctx), 'example:routes')
 }
 ```
 
-**Notes:**
-
-* Calling `server(ctx)` returns a disposer (safe to call more than once). When activated through `ctx.effect`, the routes are removed automatically when the plugin unloads.
-* If registration fails, only the routes from this activation are rolled back; existing routes are left untouched.
-
----
+Calling `server(ctx)` returns an idempotent disposer. Through `ctx.effect`, routes are removed automatically when the plugin unloads. If registration fails, existing routes are left untouched.
 
 ### 2. Read the context and options
 
-Pass configuration options or runtime dependencies as the second argument to `server(ctx, options)`:
+Pass configuration or runtime dependencies as the second argument to `server(ctx, options)`:
 
 ```ts
 // src/host/server/index.ts
-import { defineWebServer } from 'dsh-h3'
+import { defineWebServer } from 'dsh-hono'
 import { status } from './routes/status'
 
 export interface Options {
@@ -97,81 +89,73 @@ export const server = defineWebServer<Options>(app => app.get('/api/status', sta
 ```
 
 ```ts
-import type { Options } from '../index'
-import { getServerContext, getServerOptions } from 'dsh-h3/utils'
 // src/host/server/routes/status.ts
-import { defineEventHandler } from 'h3'
+import type { Context } from 'hono'
+import type { Options } from '../index'
+import { getServerContext, getServerOptions } from 'dsh-hono/utils'
 
-export const status = defineEventHandler((event) => {
-  const ctx = getServerContext(event)
-  const options = getServerOptions<Options>(event)
-
-  return {
-    port: ctx.webServer.port,
-    uptimeMs: Date.now() - options.startedAt,
-  }
-})
+export function status(c: Context) {
+  const ctx = getServerContext(c)
+  const options = getServerOptions<Options>(c)
+  return c.json({ port: ctx.webServer.port, uptimeMs: Date.now() - options.startedAt })
+}
 ```
 
 ```ts
 // src/host/apply.ts
 import type { Context } from '@deepseek-ai/cordis'
-import { getServerContext, getServerOptions } from 'dsh-h3/utils'
+import { getServerContext, getServerOptions } from 'dsh-hono/utils'
 import { server } from './server'
 
 export const inject = ['webServer']
 
 export function apply(ctx: Context): void {
-  const options = { startedAt: Date.now() }
-  ctx.effect(() => server(ctx, options), 'status:routes')
-
-  // Read the context and options outside the handlers (valid only while the service is active)
-  getServerContext(server) // returns the Context that was passed in
-  getServerOptions(server) // automatically inferred as Options
+  ctx.effect(() => server(ctx, { startedAt: Date.now() }), 'status:routes')
+  getServerContext(server) // the Cordis Context passed to the active service
+  getServerOptions(server) // Options inferred from the service
 }
 ```
 
-> **Isolation**: each activation captures its own `Context` and options. When the same service is activated in multiple hosts, handlers always keep the data of their own activation and are never overwritten by later activations.
+Each activation captures its own Context and options. Requests always retain their activation's data even when the same service is activated in multiple hosts.
 
----
-
-### 3. Native Node.js HTTP handlers
-
-Convert Node.js HTTP callbacks explicitly with H3's `fromNodeHandler`:
+### 3. Native middleware and sub-apps
 
 ```ts
-import { defineWebServer } from 'dsh-h3'
-import { fromNodeHandler } from 'h3'
+import { defineWebServer } from 'dsh-hono'
+import { Hono } from 'hono'
+
+const child = new Hono()
+child.get('/text', c => c.text(c.req.method))
 
 const server = defineWebServer((app) => {
-  app.get('/api/text', fromNodeHandler((req, res) => {
-    res.setHeader('content-type', 'text/plain; charset=utf-8')
-    res.end(req.method)
-  }))
+  app.use('/api/*', async (c, next) => {
+    await next()
+    c.header('X-Plugin', 'example')
+  })
+  app.route('/api', child)
 })
 ```
 
-> ⚠️ **Tip**: Node handlers are not converted automatically based on their parameter count. Explicitly converted Node handlers work at runtime, but GenAPI cannot analyse them.
-
----
+Use Hono Context handlers and `(c, next)` middleware, not Node.js `(req, res)` callbacks. The official Node adapter connects the host's HTTP requests internally; **do not call `serve()` or bind another port**. Mounted sub-apps and multiple-handler routes work at runtime but are outside GenAPI's static subset.
 
 ## 🛠️ Generate the client API
 
-`dsh-h3/genapi` provides the `original` build stage for GenAPI. It statically analyses the route definitions and H3 handlers in the service entry, and builds the client API directly, **without loading the plugin or executing host code**.
+`dsh-hono/genapi` provides GenAPI's `original` build stage. It statically analyses the service entry and native Hono handlers, **without loading the plugin or executing host code**.
 
-### 1. Install the dev dependencies
+### 1. Install dev dependencies
 
 ```sh
 pnpm add -D @genapi/core @genapi/pipeline @genapi/presets
 ```
 
-### 2. Configuration file (`genapi.config.ts`)
+### 2. Configure the pipeline
 
 ```ts
+// genapi.config.ts
 import { defineConfig } from '@genapi/core'
 import pipeline from '@genapi/pipeline'
 import { fetch } from '@genapi/presets'
-import { original } from 'dsh-h3/genapi'
+import { original } from 'dsh-hono/genapi'
 
 export default defineConfig({
   preset: pipeline(
@@ -180,7 +164,7 @@ export default defineConfig({
     fetch.ts.parser,
     fetch.ts.compiler,
     fetch.ts.generate,
-    fetch.ts.dest
+    fetch.ts.dest,
   ),
   input: './src/host/server/index.ts',
   output: {
@@ -190,117 +174,123 @@ export default defineConfig({
 })
 ```
 
-### 3. Run code generation
+### 3. Declare JSON request/response contracts
+
+```ts
+import type { Context } from 'hono'
+
+interface EchoQuery { name?: string }
+interface EchoBody { message: string }
+
+export async function echo(c: Context) {
+  const query = c.req.query() as EchoQuery
+  const body = await c.req.json<EchoBody>()
+  // Type declarations are not validation; validate untrusted fields before use.
+  return c.json({ name: query.name ?? 'guest', message: body.message })
+}
+```
+
+Register this handler with `app.post('/api/echo', echo)`, then run:
 
 ```sh
 pnpm exec genapi
 ```
 
+The generated fetch client receives the body and query as separate arguments. The [playground](<playground/README.md>) includes validation and concrete generated-client calls.
+
 ### Rules and limitations
 
-* **Input requirement**: the `input` file must be an entry file that declares `defineWebServer` directly at the top level of the module.
-* **Supported syntax**:
-  * `app.get/post/...`, `app.on('POST', ...)`, and chaining are supported.
-  * Static string paths and simple `:parameter` routes below a static prefix are supported; `'/api/users/:id'` generates a required path parameter.
-  * The only wildcard exception is a terminal `/**` after a non-root, fully static prefix: `'/api/inspect/**'` generates a request function for the fixed endpoint `/api/inspect` only, never a wildcard or child-path client.
-  * Query/Body types are inferred automatically from `getQuery<Query>(event)` or `readBody<Body>(event)`.
-* **Naming**: function names and generated type names are derived from the path and HTTP method (for example, `/api/health` -> `getApiHealth`, `GetApiHealthResponse`). Use `patch.operations` to customize the function name.
-* **Not supported**: dynamic conditions, loops, mounted sub-apps, root `/**`, `/**` after a parameterized prefix, other wildcards or complex regex patterns, Node handlers (including `fromNodeHandler` wrappers), recursive types, and non-JSON contracts (unsupported syntax reports the exact source location).
-
----
+- Declare `defineWebServer` directly at module scope; keep setup synchronous and statically resolvable.
+- Supports `app.get/post/put/patch/delete/options`, `app.on('POST', ...)` (including native method/path arrays), and chaining. Hono handles `HEAD` through `GET`; there is no `app.head` registrar.
+- Supports static strings and simple `:parameter` segments under a static prefix; `/api/users/:id` generates a required path parameter.
+- A terminal `/*` after a non-root, fully static prefix generates only the fixed base endpoint: `/api/inspect/*` produces a client for `/api/inspect`, not arbitrary child paths.
+- Use `c.req.query() as Query` and `c.req.json<Body>()` directly inside the handler (at most one of each), with direct `c.req` access through the Context identifier. Destructured Context parameters and request aliases such as `const req = c.req` are rejected rather than silently omitting request contracts; they remain valid at runtime. Query values are strings; Hono's query API does not accept an object type generic. The response must be a typed JSON response from `c.json(...)`.
+- Preserves the existing aggregated JSON response contract under `200`, not a complete status map. Early `app.use` responses and error-hook responses are not independently modeled.
+- Function/type names derive from HTTP method and path (`getApiHealth`, `GetApiHealthResponse`). Use `patch.operations` to override client function names.
+- Dynamic conditions, loops, sub-app mounting, multiple-handler routes, root wildcards, parameterized wildcard prefixes, complex regex patterns, Node callbacks, recursive types, and non-JSON responses are unsupported. Unsupported syntax reports its source location; multiple handlers are rejected rather than silently losing a middleware response contract.
 
 ## 💡 Example project
 
-The repository ships a complete [basic example](<playground/README.md>) that shows a plugin organised into a service entry and separate route files, its [GenAPI config](<playground/genapi.config.ts>), and the [generated client API](<playground/src/client/apis/index.ts>), together with real host requests and consistency checks.
+The [basic example](<playground/README.md>) includes separate native route files, a [GenAPI config](<playground/genapi.config.ts>), and [generated clients](<playground/src/client/apis/index.ts>). It uses the host's existing server.
 
 ```sh
-# Install and build the example
+# From the repository root
 pnpm install
-cd playground
-pnpm genapi
 pnpm build
-
-# Run it (from the repository root; the dsh CLI must be installed)
-dsh web --patch ./cordis.patch.yml
+pnpm --filter dsh-plugin-playground genapi
+pnpm --filter dsh-plugin-playground build
+pnpm --filter dsh-plugin-playground typecheck
 ```
 
----
+To load the built plugin into your DSH profile, use the [loader patch](<playground/cordis.patch.yml>) when starting that host; do not start a second server alongside an existing instance. See the example for the working-directory-sensitive command.
 
 ## 📚 API reference
 
 ### `defineWebServer<Options>(setup)`
 
 ```ts
-import type { H3 } from 'h3'
+import type { Hono } from 'hono'
 
 function defineWebServer<Options = undefined>(
-  setup: (app: H3) => void | H3,
+  setup: (app: Hono) => void | Hono,
 ): HostService<Options>
 ```
 
-Each activation creates a brand-new H3 instance. The `setup` function must run synchronously and return `undefined` or the supplied `app`. It receives the native H3 instance without replacing `app.on`; route registration keeps H3's string paths, handler types, and chaining.
+Every activation creates a fresh native Hono instance with `strict: false`. Setup must run synchronously and return nothing or the supplied app. Native Context handlers, middleware, `app.on`, `app.route`, and chaining remain available. Host ownership tracking observes the supplied app; middleware ownership on `basePath()` clones is not guaranteed. Use `app.route('/prefix', child)` for prefix grouping.
 
-### `getServerContext(server | event)`
+### `getServerContext(server | c)` / `getServerOptions<Options>(server | c)`
 
-Imported from `dsh-h3/utils`. Returns the `Context` object passed in for the current activation.
+Imported from `dsh-hono/utils`. They accept an active service or its native Hono Context and return the activation's Cordis Context/options. Options are inferred from the service; pass the type explicitly for a request Context.
 
-### `getServerOptions<Options>(server | event)`
-
-Imported from `dsh-h3/utils`. Returns the options object passed in for the current activation. Extraction from `server` supports automatic type inference; extraction from an event requires the options type explicitly.
-
-`server.__host_instance` points to the most recent successfully activated instance. Disposing an older instance does not clear a newer one; after disposing the current instance it does not fall back to an earlier one. When the service is not active, or when an event does not belong to this library, both helpers throw a `TypeError`.
+`server.__host_instance` points to the most recent successful activation. Disposing an older instance does not clear a newer one; disposing the current instance does not fall back to an earlier one. Both helpers throw `TypeError` for an inactive service or a Context not belonging to this library.
 
 ### `original(configRead)`
 
-Imported from `dsh-h3/genapi`. Used inside the GenAPI pipeline to fill in the routes and their type metadata.
+Imported from `dsh-hono/genapi`. Fills route/type metadata in the GenAPI pipeline.
 
-### H3 string paths and host matching
+### String paths and host matching
 
-Routes accept native H3 string paths only; the internal adapter infers host matching:
-
-| Path declaration | Host-side registration matching |
+| Native Hono path | Host matching |
 | --- | --- |
-| `'/api/version'` | Exact match (exact) `/api/version` |
-| `'/api/users/:id'` | Prefix match (prefix) `/api/users`; params are resolved by H3 |
-| `'/api/inspect/**'` | Prefix match (prefix) `/api/inspect`; the wildcard is resolved by H3 |
+| `/api/version` | exact `/api/version` |
+| `/api/users/:id` | prefix `/api/users`; Hono resolves parameters |
+| `/api/inspect/*` | prefix `/api/inspect`; Hono resolves the wildcard |
 
-Static paths infer exact matching. Dynamic patterns infer the static prefix before their first dynamic segment, with H3 performing the actual match. Root-level patterns such as `/:id` and `/**` are unsupported. Host prefixes respect path-segment boundaries, so `/api/inspection` does not enter the `/api/inspect` route group.
+Route declarations must be canonical without a trailing slash except `/`; `/x/` is rejected. `strict: false` does not relax declaration validation or host exact dispatch: `/x/` does not enter a host exact `/x` route.
 
-Each host route group retains method and path ownership: an unmatched method on a matched path returns `405` with an `allow` header, and `HEAD` falls back to `GET`. `all`, `HEAD`, and pattern routes cannot escape their group. Registering a host-owned `(kind, path)` again fails and rolls back only the current activation.
+Dynamic patterns use the static prefix before their first dynamic segment. Root-level route patterns (`/:id`, `/*`) are unsupported. Prefix matching respects segment boundaries: `/api/inspection` does not enter `/api/inspect`. Global `app.use('*', ...)` middleware is not itself a host route.
 
-> 🔐 **Security advice**: authentication, authorization, and body size limits are the plugin's own responsibility. Always configure the appropriate H3 middleware for sensitive routes in advance.
+Directly declared routes keep method/path ownership per host group: a disallowed method on a matching path returns `405` with `allow`; `HEAD` falls back to `GET`. `all`, `HEAD`, and pattern routes cannot escape their group. A host-owned `(kind, path)` conflict rolls back only the new activation.
 
----
+`app.route('/mount', child)` treats the entire mount as one host prefix ownership unit. The child application's method matching and 404 behavior remain native Hono behavior, rather than the direct-route 405 grouping. Existing host exact routes still take precedence over prefix mounts.
+
+> 🔐 Authentication, authorization, and body size limits are the plugin's responsibility. Use native Hono middleware, such as `hono/body-limit`, for sensitive routes. Request types alone do not validate input.
 
 ## 🛠️ Development and contributing
 
 ```sh
-pnpm install     # install dependencies
-pnpm lint        # code style check
-pnpm knip        # unused code/dependency check
-pnpm test --run  # run unit and integration tests
-pnpm typecheck   # TypeScript type check
-pnpm build       # build the project
-pnpm coverage    # run tests, emit coverage reports and enforce the 90% thresholds
+pnpm install
+pnpm lint
+pnpm knip
+pnpm test --run
+pnpm typecheck
+pnpm build
+pnpm coverage # enforce the configured 90% coverage thresholds
 ```
-
----
 
 ## 📜️ License
 
-MIT
+MIT. The original license and attribution are retained.
 
-<!-- Badges -->
-
-[npm-version-src]: https://img.shields.io/npm/v/dsh-h3?style=flat&colorA=080f12&colorB=1fa669
-[npm-version-href]: https://npmjs.com/package/dsh-h3
-[npm-downloads-src]: https://img.shields.io/npm/dm/dsh-h3?style=flat&colorA=080f12&colorB=1fa669
-[npm-downloads-href]: https://npmjs.com/package/dsh-h3
-[bundle-src]: https://img.shields.io/bundlephobia/minzip/dsh-h3?style=flat&colorA=080f12&colorB=1fa669&label=minzip
-[bundle-href]: https://bundlephobia.com/result?p=dsh-h3
+[npm-version-src]: https://img.shields.io/npm/v/dsh-hono?style=flat&colorA=080f12&colorB=1fa669
+[npm-version-href]: https://npmjs.com/package/dsh-hono
+[npm-downloads-src]: https://img.shields.io/npm/dm/dsh-hono?style=flat&colorA=080f12&colorB=1fa669
+[npm-downloads-href]: https://npmjs.com/package/dsh-hono
+[bundle-src]: https://img.shields.io/bundlephobia/minzip/dsh-hono?style=flat&colorA=080f12&colorB=1fa669&label=minzip
+[bundle-href]: https://bundlephobia.com/result?p=dsh-hono
 [jsdocs-src]: https://img.shields.io/badge/jsdocs-reference-080f12?style=flat&colorA=080f12&colorB=1fa669
-[jsdocs-href]: https://www.jsdocs.io/package/dsh-h3
-[coverage-src]: https://codecov.io/gh/omdsh-dev/dsh-h3/graph/badge.svg
-[coverage-href]: https://codecov.io/gh/omdsh-dev/dsh-h3
-[license-src]: https://img.shields.io/github/license/omdsh-dev/dsh-h3.svg?style=flat&colorA=080f12&colorB=1fa669
-[license-href]: https://github.com/omdsh-dev/dsh-h3/blob/main/LICENSE
+[jsdocs-href]: https://www.jsdocs.io/package/dsh-hono
+[coverage-src]: https://codecov.io/gh/omdsh-dev/dsh-hono/graph/badge.svg
+[coverage-href]: https://codecov.io/gh/omdsh-dev/dsh-hono
+[license-src]: https://img.shields.io/github/license/omdsh-dev/dsh-hono.svg?style=flat&colorA=080f12&colorB=1fa669
+[license-href]: https://github.com/omdsh-dev/dsh-hono/blob/main/LICENSE.md

@@ -4,6 +4,7 @@ catalogMode: prefer
 minimumReleaseAgeExcludePrune: true
 minimumReleaseAgeExclude:
   - '@antfu/skills@0.1.0'
+  - '@hono/node-server@2.1.4'
 
 trustPolicy: no-downgrade
 
@@ -29,7 +30,9 @@ catalog:
   '@genapi/pipeline': ^4.1.4
   '@genapi/presets': ^4.1.4
   '@genapi/shared': ^4.1.4
-  h3: ^2.0.1
+  '@hono/node-server': ^2.1.4
+
+  hono: 4.13.13
 
 catalogs:
   agentic:

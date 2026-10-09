@@ -1,6 +1,6 @@
-import { defineWebServer } from 'dsh-h3'
-import { defineEventHandler } from 'h3'
+import type { Context } from 'hono'
+import { defineWebServer } from '../../../src/index'
 
 export const server = defineWebServer((app) => {
-  app.get('/api/**/child', defineEventHandler(() => ({ ok: true })))
+  app.get('/api/*/child', (c: Context) => c.json(({ ok: true })))
 })

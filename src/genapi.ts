@@ -55,7 +55,7 @@ function typeName(...parts: string[]): string {
 
 export function original(configRead: ApiPipeline.ConfigRead): ApiPipeline.ConfigRead {
   if (!configRead.inputs.uri)
-    throw new TypeError('dsh-h3/genapi: input must be a local service entry file')
+    throw new TypeError('dsh-hono/genapi: input must be a local service entry file')
   const entry = resolve(configRead.inputs.uri)
   const configFile = ts.findConfigFile(dirname(entry), ts.sys.fileExists)
   let options: ts.CompilerOptions = { strict: true, target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.Preserve, moduleResolution: ts.ModuleResolutionKind.Bundler, skipLibCheck: true }
@@ -71,21 +71,21 @@ export function original(configRead: ApiPipeline.ConfigRead): ApiPipeline.Config
   const program = ts.createProgram([entry], options)
   const file = program.getSourceFile(entry)
   if (!file)
-    throw new Error(`dsh-h3/genapi: cannot read service entry ${entry}`)
+    throw new Error(`dsh-hono/genapi: cannot read service entry ${entry}`)
   const diagnostics = ts.getPreEmitDiagnostics(program)
   if (diagnostics.length)
     throw new Error(ts.formatDiagnostics(diagnostics, diagnosticHost))
   const checker = program.getTypeChecker()
   const typeScope = configRead.graphs.scopes.type
   if (!typeScope)
-    throw new TypeError('dsh-h3/genapi: a TypeScript type output is required')
+    throw new TypeError('dsh-hono/genapi: a TypeScript type output is required')
   const paths: Record<string, Record<string, unknown>> = {}
   const declared = new Set<string>()
 
   function fail(node: ts.Node, message: string): never {
     const source = node.getSourceFile()
     const { line, character } = source.getLineAndCharacterOfPosition(node.getStart())
-    throw new TypeError(`dsh-h3/genapi: ${source.fileName}:${line + 1}:${character + 1}: ${message}`)
+    throw new TypeError(`dsh-hono/genapi: ${source.fileName}:${line + 1}:${character + 1}: ${message}`)
   }
 
   function symbolOf(node: ts.Node): ts.Symbol | undefined {
@@ -126,8 +126,13 @@ export function original(configRead: ApiPipeline.ConfigRead): ApiPipeline.Config
     return fail(node, 'route paths and HTTP methods must be static strings')
   }
 
+  function isHonoJsonValue(type: ts.Type): boolean {
+    // Hono JSONParsed<unknown> becomes its recursive JSONValue, not a concrete user contract.
+    return type.aliasSymbol?.getName() === 'JSONValue' && /[/\\]hono[/\\]dist[/\\]types[/\\]utils[/\\]types\.d\.ts$/.test(type.aliasSymbol.declarations?.[0]?.getSourceFile().fileName ?? '')
+  }
+
   function typeValue(type: ts.Type, node: ts.Node, seen = new Set<ts.Type>()): string {
-    if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown))
+    if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown) || isHonoJsonValue(type))
       return 'unknown'
     if (type.flags & (ts.TypeFlags.StringLiteral | ts.TypeFlags.NumberLiteral))
       return JSON.stringify((type as ts.StringLiteralType | ts.NumberLiteralType).value)
@@ -181,18 +186,21 @@ export function original(configRead: ApiPipeline.ConfigRead): ApiPipeline.Config
   }
 
   function handlerOf(node: ts.Expression): ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration {
-    let value = valueOf(node)
-    if (ts.isCallExpression(value) && ['defineEventHandler', 'defineHandler', 'eventHandler'].includes(nameOf(value.expression) ?? '')) {
-      value = valueOf(value.arguments[0])
-      if (ts.isObjectLiteralExpression(value)) {
-        const handler = value.properties.find(property => ts.isPropertyAssignment(property) && property.name.getText() === 'handler')
-        if (handler && ts.isPropertyAssignment(handler))
-          value = valueOf(handler.initializer)
-      }
-    }
-    if ((ts.isArrowFunction(value) || ts.isFunctionExpression(value) || ts.isFunctionDeclaration(value)) && value.body && value.parameters.length < 2)
+    const value = valueOf(node)
+    if ((ts.isArrowFunction(value) || ts.isFunctionExpression(value) || ts.isFunctionDeclaration(value)) && value.body && value.parameters.length <= 2)
       return value
-    return fail(node, 'use a statically resolvable H3 event handler, not a Node callback or sub-application')
+    return fail(node, 'use a statically resolvable Hono handler, not a wrapper or sub-application')
+  }
+
+  function responseValue(type: ts.Type, node: ts.Node): string {
+    const awaited = checker.getAwaitedType(type) ?? type
+    if (awaited.isUnion())
+      return `(${awaited.types.map(part => responseValue(part, node)).join(' | ')})`
+    const format = awaited.getProperty('_format')
+    const data = awaited.getProperty('_data')
+    if (!format || !data || checker.typeToString(checker.getTypeOfSymbolAtLocation(format, node)) !== '"json"')
+      return fail(node, 'response must have a statically inferred JSON TypedResponse; use c.json(...)')
+    return typeValue(checker.getTypeOfSymbolAtLocation(data, node), node)
   }
 
   function routeOf(route: ts.Expression): { path: string, parameters: Array<Record<string, unknown>> } {
@@ -202,9 +210,9 @@ export function original(configRead: ApiPipeline.ConfigRead): ApiPipeline.Config
     if (/[{}]/.test(path))
       return fail(route, 'only static paths and simple :parameter segments below a static prefix are supported')
     path = new URL(path, 'http://localhost').pathname
-    // ponytail: terminal /** exposes only the static base contract; model descendant paths when needed.
-    if (path.endsWith('/**') && path !== '/**' && !path.endsWith('//**') && !path.includes(':'))
-      path = path.slice(0, -3)
+    // ponytail: terminal /* exposes only the static base contract; model descendant paths when needed.
+    if (path.endsWith('/*') && path !== '/*' && !path.endsWith('//*') && !path.includes(':'))
+      path = path.slice(0, -2)
     const parameters: Array<Record<string, unknown>> = []
     if (/^\/:|[*()+]/.test(path))
       return fail(route, 'only static paths and simple :parameter segments below a static prefix are supported')
@@ -231,19 +239,43 @@ export function original(configRead: ApiPipeline.ConfigRead): ApiPipeline.Config
     const signature = checker.getTypeAtLocation(handler).getCallSignatures()[0]
     if (!signature)
       return fail(handler, 'handler must be callable')
+    if (fn.parameters[0] && !ts.isIdentifier(fn.parameters[0].name))
+      return fail(fn.parameters[0], 'use a named Hono Context parameter; destructured request contracts are not supported')
     const response = checker.getReturnTypeOfSignature(signature)
-    const schema = alias(typeName(name, 'response'), checker.getAwaitedType(response) ?? response, handler)
+    const context = fn.parameters[0] && checker.getSymbolAtLocation(fn.parameters[0].name)
+    function isContext(node: ts.Expression): boolean {
+      return ts.isIdentifier(node) && checker.getSymbolAtLocation(node) === context
+    }
+    function validateJson(node: ts.Node): void {
+      if (ts.isFunctionLike(node) && node !== fn)
+        return
+      if (ts.isVariableDeclaration(node) && node.initializer) {
+        const value = valueOf(node.initializer)
+        const receiver = ts.isPropertyAccessExpression(value) ? value.expression : value
+        if (ts.isExpression(value) && (isContext(value) || (ts.isExpression(receiver) && isContext(receiver)) || (ts.isPropertyAccessExpression(receiver) && receiver.name.text === 'req' && isContext(receiver.expression))))
+          fail(node, 'Context and request aliases are not supported; use c.req.query()/c.req.json<T>() directly')
+      }
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'json' && isContext(node.expression.expression) && node.arguments[0])
+        typeValue(checker.getTypeAtLocation(node.arguments[0]), node.arguments[0])
+      ts.forEachChild(node, validateJson)
+    }
+    validateJson(fn)
+    const responseName = declare(handler, typeName(name, 'response'))
+    typeScope.typings.push({ name: responseName, value: responseValue(response, handler), export: true })
+    const schema = { $ref: `#/definitions/${responseName}` }
     const reads = new Set<string>()
     function requestOf(node: ts.CallExpression, kind: string): void {
       if (reads.has(kind))
-        return fail(node, 'use one getQuery/readBody contract per handler')
+        return fail(node, 'use one c.req.query/c.req.json contract per handler')
       reads.add(kind)
       let typed: ts.Node = node
       while (ts.isAwaitExpression(typed.parent) || ts.isParenthesizedExpression(typed.parent) || ts.isAsExpression(typed.parent) || ts.isTypeAssertionExpression(typed.parent))
         typed = typed.parent
       const inferred = node.typeArguments?.[0] && typed === node ? checker.getTypeFromTypeNode(node.typeArguments[0]) : checker.getTypeAtLocation(typed)
       const type = checker.getNonNullableType(checker.getAwaitedType(inferred) ?? inferred)
-      if (kind === 'getQuery') {
+      if (kind === 'query') {
+        if (!(type.flags & ts.TypeFlags.Object) || checker.isArrayType(type) || checker.isTupleType(type) || checker.getIndexTypeOfType(type, ts.IndexKind.String))
+          return fail(node, 'c.req.query requires a typed object contract with named fields')
         for (const field of checker.getPropertiesOfType(type)) {
           const ref = alias(typeName(name, 'query', field.getName()), checker.getTypeOfSymbolAtLocation(field, node), node)
           parameters.push({ ...ref, name: field.getName(), in: 'query', required: !(field.flags & ts.SymbolFlags.Optional) })
@@ -251,7 +283,7 @@ export function original(configRead: ApiPipeline.ConfigRead): ApiPipeline.Config
         return
       }
       if (!(type.flags & ts.TypeFlags.Object) || checker.isArrayType(type) || checker.isTupleType(type) || checker.getIndexTypeOfType(type, ts.IndexKind.String))
-        return fail(node, 'readBody requires an object contract with named fields')
+        return fail(node, 'c.req.json requires an object contract with named fields')
       const properties = checker.getPropertiesOfType(type).map(field => ({ name: field.getName(), type: typeValue(checker.getTypeOfSymbolAtLocation(field, node), node), required: !(field.flags & ts.SymbolFlags.Optional) }))
       const body = declare(node, typeName(name, 'body'))
       typeScope.interfaces.push({ name: body, properties, export: true })
@@ -260,10 +292,14 @@ export function original(configRead: ApiPipeline.ConfigRead): ApiPipeline.Config
     function visit(node: ts.Node): void {
       if (ts.isFunctionLike(node) && node !== fn)
         return
-      if (ts.isCallExpression(node)) {
-        const kind = nameOf(node.expression)
-        if (kind === 'getQuery' || kind === 'readBody')
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+        const kind = node.expression.name.text
+        const receiver = node.expression.expression
+        if ((kind === 'query' || kind === 'json') && ts.isPropertyAccessExpression(receiver) && receiver.name.text === 'req' && isContext(receiver.expression)) {
+          if (node.arguments.length)
+            fail(node, 'use c.req.query() with a typed object contract, not a keyed query read')
           requestOf(node, kind)
+        }
       }
       ts.forEachChild(node, visit)
     }
@@ -280,6 +316,19 @@ export function original(configRead: ApiPipeline.ConfigRead): ApiPipeline.Config
     function isApp(expression: ts.Expression): boolean {
       return ts.isIdentifier(expression) ? checker.getSymbolAtLocation(expression) === app : ts.isCallExpression(expression) && ts.isPropertyAccessExpression(expression.expression) && isApp(expression.expression.expression)
     }
+    function registerOn(expression: ts.CallExpression): void {
+      const methodValue = valueOf(expression.arguments[0])
+      const routeValue = valueOf(expression.arguments[1])
+      const httpMethods = ts.isArrayLiteralExpression(methodValue) ? methodValue.elements : [expression.arguments[0]]
+      const routes = ts.isArrayLiteralExpression(routeValue) ? routeValue.elements : [expression.arguments[1]]
+      if (!httpMethods.length || !routes.length)
+        return fail(expression, 'app.on requires non-empty static methods and paths')
+      for (const method of httpMethods) {
+        for (const route of routes) {
+          register(expression, textOf(method).toLowerCase(), route, expression.arguments[2])
+        }
+      }
+    }
     function visit(expression: ts.Expression): void {
       if (!ts.isCallExpression(expression) || !ts.isPropertyAccessExpression(expression.expression) || !isApp(expression.expression.expression))
         return fail(expression, 'setup must use direct app.method(...) route declarations')
@@ -292,11 +341,15 @@ export function original(configRead: ApiPipeline.ConfigRead): ApiPipeline.Config
       if (method === 'on') {
         if (expression.arguments.length < 3)
           return fail(expression, 'app.on requires method, path and handler')
-        register(expression, textOf(expression.arguments[0]).toLowerCase(), expression.arguments[1], expression.arguments[2])
+        if (expression.arguments.length !== 3)
+          return fail(expression, 'route middleware and extra route arguments are not supported; use one native handler')
+        registerOn(expression)
       }
       else {
         if (expression.arguments.length < 2)
           return fail(expression, 'route declarations require path and handler')
+        if (expression.arguments.length !== 2)
+          return fail(expression, 'route middleware and extra route arguments are not supported; use one native handler')
         register(expression, method, expression.arguments[0], expression.arguments[1])
       }
     }
@@ -351,7 +404,7 @@ export function original(configRead: ApiPipeline.ConfigRead): ApiPipeline.Config
   }
   scan(file)
   if (!Object.keys(paths).length)
-    throw new TypeError('dsh-h3/genapi: no static defineWebServer routes found in input')
+    throw new TypeError('dsh-hono/genapi: no static defineWebServer routes found in input')
   configRead.source = { swagger: '2.0', info: { title: basename(entry, '.ts'), version: '0.0.0' }, paths, definitions: {} }
   return configRead
 }

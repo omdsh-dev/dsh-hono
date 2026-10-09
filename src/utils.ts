@@ -1,20 +1,20 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type { H3Event } from 'h3'
+import type { Context as HonoContext } from 'hono'
 import type { HostService, HostServiceInstance } from './index'
 
-export function getServerContext<Options>(source: HostService<Options> | H3Event): Context {
+export function getServerContext<Options>(source: HostService<Options> | HonoContext): Context {
   return instanceOf(source).context
 }
 
-export function getServerOptions<Options>(source: HostService<Options> | H3Event): Options {
+export function getServerOptions<Options>(source: HostService<Options> | HonoContext): Options {
   return instanceOf(source).options
 }
 
-function instanceOf<Options>(source: HostService<Options> | H3Event): HostServiceInstance<Options> {
+function instanceOf<Options>(source: HostService<Options> | HonoContext): HostServiceInstance<Options> {
   const instance = typeof source === 'function'
     ? source.__host_instance
-    : source?.context?.__host_instance as HostServiceInstance<Options> | undefined
+    : source?.get('__host_instance') as HostServiceInstance<Options> | undefined
   if (!instance)
-    throw new TypeError('dsh-h3: service is not active or event does not belong to a host service')
+    throw new TypeError('dsh-hono: service is not active or context does not belong to a host service')
   return instance
 }

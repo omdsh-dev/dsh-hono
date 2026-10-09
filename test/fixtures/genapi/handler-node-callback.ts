@@ -1,8 +1,6 @@
-import { defineWebServer } from 'dsh-h3'
-import { fromNodeHandler } from 'h3'
+import { defineWebServer } from '../../../src/index'
 
-const nodeCallback: (request: unknown, response: unknown) => undefined = (_request, _response) => undefined
-
+const nodeCallback = (_request: unknown, _response: unknown): undefined => undefined
 export const server = defineWebServer((app) => {
-  app.get('/api/node-callback', fromNodeHandler(nodeCallback))
+  app.get('/api/node-callback', (() => nodeCallback)() as never)
 })

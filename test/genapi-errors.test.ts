@@ -34,7 +34,8 @@ function accepts(name: string): ApiPipeline.GraphSlice {
   return configRead.graphs.scopes.type
 }
 
-describe('genapi input and configuration failures', () => {
+// Static TypeScript programs are slower under V8 coverage instrumentation.
+describe('genapi input and configuration failures', { timeout: 20_000 }, () => {
   it('rejects a missing service entry uri (src/genapi.ts:57-58)', () => {
     expect(() => original(read(''))).toThrow(/input must be a local service entry file/)
   })
@@ -48,7 +49,7 @@ describe('genapi input and configuration failures', () => {
   })
 
   it('rejects a service entry that cannot be read, without any tsconfig above it (src/genapi.ts:73-74)', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-h3-genapi-'))
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-hono-genapi-'))
     expect(() => original(read(join(directory, 'entry.ts')))).toThrow(/cannot read service entry/)
   })
 
@@ -61,7 +62,8 @@ describe('genapi input and configuration failures', () => {
   })
 })
 
-describe('genapi handler and contract failures', () => {
+// Static TypeScript programs are slower under V8 coverage instrumentation.
+describe('genapi handler and contract failures', { timeout: 20_000 }, () => {
   it('rejects a non-const route binding (src/genapi.ts:113-114)', () => {
     rejects('binding-not-const.ts', /route bindings must be const/)
   })
@@ -78,12 +80,16 @@ describe('genapi handler and contract failures', () => {
     rejects('contract-recursive.ts', /recursive contracts are not supported/)
   })
 
+  it('does not mistake a recursive user JSONValue for Hono JSONParsed<unknown>', () => {
+    rejects('contract-jsonvalue.ts', /recursive contracts are not supported/)
+  })
+
   it('rejects a function member in a contract (src/genapi.ts:149-150)', () => {
     rejects('contract-function.ts', /functions and class instances are not JSON contracts/)
   })
 
-  it('rejects explicit Node handler conversion (src/genapi.ts:193-195)', () => {
-    rejects('handler-node-callback.ts', /use a statically resolvable H3 event handler/)
+  it('rejects a computed Node-style callback wrapper (src/genapi.ts:193-195)', () => {
+    rejects('handler-node-callback.ts', /use a statically resolvable Hono handler/)
   })
 
   it('rejects a handler without any call signature (src/genapi.ts:232-233)', () => {
@@ -91,27 +97,28 @@ describe('genapi handler and contract failures', () => {
   })
 
   it('rejects two contracts read from one handler (src/genapi.ts:238-239)', () => {
-    rejects('request-twice.ts', /use one getQuery\/readBody contract per handler/)
+    rejects('request-twice.ts', /use one c\.req\.query\/c\.req\.json contract per handler/)
   })
 
-  it('rejects readBody over a string contract (src/genapi.ts:253-254)', () => {
-    rejects('readbody-string.ts', /readBody requires an object contract with named fields/)
+  it('rejects c.req.json over a string contract (src/genapi.ts:253-254)', () => {
+    rejects('readbody-string.ts', /c\.req\.json requires an object contract with named fields/)
   })
 
-  it('rejects readBody over an array contract (src/genapi.ts:253-254)', () => {
-    rejects('readbody-array.ts', /readBody requires an object contract with named fields/)
+  it('rejects c.req.json over an array contract (src/genapi.ts:253-254)', () => {
+    rejects('readbody-array.ts', /c\.req\.json requires an object contract with named fields/)
   })
 
-  it('rejects readBody over a tuple contract (src/genapi.ts:253-254)', () => {
-    rejects('readbody-tuple.ts', /readBody requires an object contract with named fields/)
+  it('rejects c.req.json over a tuple contract (src/genapi.ts:253-254)', () => {
+    rejects('readbody-tuple.ts', /c\.req\.json requires an object contract with named fields/)
   })
 
-  it('rejects readBody over an index signature contract (src/genapi.ts:253-254)', () => {
-    rejects('readbody-index.ts', /readBody requires an object contract with named fields/)
+  it('rejects c.req.json over an index signature contract (src/genapi.ts:253-254)', () => {
+    rejects('readbody-index.ts', /c\.req\.json requires an object contract with named fields/)
   })
 })
 
-describe('genapi route failures', () => {
+// Static TypeScript programs are slower under V8 coverage instrumentation.
+describe('genapi route failures', { timeout: 20_000 }, () => {
   it('rejects a relative route path (src/genapi.ts:200-201)', () => {
     rejects('path-relative.ts', /route path must be an absolute pathname/)
   })
@@ -149,7 +156,8 @@ describe('genapi route failures', () => {
   })
 })
 
-describe('genapi setup failures', () => {
+// Static TypeScript programs are slower under V8 coverage instrumentation.
+describe('genapi setup failures', { timeout: 20_000 }, () => {
   it('rejects a setup callback without an app parameter (src/genapi.ts:277-278)', () => {
     rejects('setup-no-param.ts', /defineWebServer requires a static setup callback with an app parameter/)
   })
@@ -187,7 +195,68 @@ describe('genapi setup failures', () => {
   })
 })
 
-describe('genapi accepted input branches', () => {
+// Static TypeScript programs are slower under V8 coverage instrumentation.
+describe('genapi native Hono contracts', { timeout: 20_000 }, () => {
+  it('rejects destructured Context instead of dropping its body contract', () => {
+    rejects('request-destructured.ts', /destructured request contracts are not supported/)
+  })
+
+  it.each(['request-alias.ts', 'context-alias.ts'])('rejects aliased requests instead of dropping their contracts: %s', (name) => {
+    rejects(name, /Context and request aliases are not supported/)
+  })
+
+  it.each(['response-text.ts', 'response-raw.ts', 'response-mixed.ts'])('rejects non-JSON responses instead of describing Response internals: %s', (name) => {
+    rejects(name, /response must have a statically inferred JSON TypedResponse/)
+  })
+
+  it('requires named query fields instead of silently losing an untyped contract', () => {
+    rejects('query-untyped.ts', /c.req.query requires a typed object contract with named fields/)
+  })
+
+  it('rejects keyed query reads', () => {
+    rejects('query-keyed.ts', /not a keyed query read/)
+  })
+
+  it.each(['route-middleware.ts', 'on-middleware.ts'])('rejects extra native middleware instead of silently losing its contract: %s', (name) => {
+    rejects(name, /route middleware and extra route arguments are not supported/)
+  })
+
+  it('rejects empty native method arrays', () => {
+    rejects('on-empty.ts', /non-empty static methods and paths/)
+  })
+
+  it('accepts native function expressions', () => {
+    expect(accepts('handler-function-expression.ts').typings[0].name).toBe('GetApiFunctionExpressionResponse')
+  })
+
+  it('supports native method/path arrays, options, HEAD, typed query and async body without executing the entry', () => {
+    const configRead = read(fixture('native.ts'))
+    original(configRead)
+    expect(Object.keys(configRead.source.paths['/api/native-a'])).toEqual(['get', 'post'])
+    expect(Object.keys(configRead.source.paths['/api/native-b'])).toEqual(['get', 'post'])
+    expect(configRead.source.paths['/api/options'].options).toBeDefined()
+    expect(configRead.source.paths['/api/head'].head).toBeDefined()
+    expect(configRead.source.paths['/api/query'].get.parameters).toEqual([
+      { $ref: '#/definitions/GetApiQueryQuerySearch', name: 'search', in: 'query', required: true },
+      { $ref: '#/definitions/GetApiQueryQueryPage', name: 'page', in: 'query', required: false },
+    ])
+    const scope = configRead.graphs.scopes.type
+    expect(scope.typings.find(typing => typing.name === 'GetApiQueryResponse')?.value).toContain('"at": string')
+    expect(scope.typings.find(typing => typing.name === 'PostApiBodyResponse')?.value).toBe('{ "message": string }')
+    expect(scope.typings.find(typing => typing.name === 'GetApiUnionResponse')?.value).toContain(' | ')
+    expect(scope.interfaces).toContainEqual({
+      name: 'PostApiBodyBody',
+      export: true,
+      properties: [
+        { name: 'message', type: 'string', required: true },
+        { name: 'tags', type: '(undefined | (string)[])', required: false },
+      ],
+    })
+  })
+})
+
+// Static TypeScript programs are slower under V8 coverage instrumentation.
+describe('genapi accepted input branches', { timeout: 20_000 }, () => {
   it('accepts native exact, static prefix and root paths', () => {
     const scope = accepts('branches-paths.ts')
     expect(scope.typings.map(typing => typing.name)).toEqual([
@@ -197,7 +266,7 @@ describe('genapi accepted input branches', () => {
     ])
   })
 
-  it('accepts parenthesized, asserted and object form handlers', () => {
+  it('accepts parenthesized, asserted and native function handlers', () => {
     const scope = accepts('branches-unwrap.ts')
     expect(scope.typings.map(typing => typing.name)).toEqual([
       'GetApiUnwrapParenthesizedResponse',
@@ -219,7 +288,7 @@ describe('genapi accepted input branches', () => {
     expect(scope.typings.map(typing => typing.name)).toContain('GetApiChainBResponse')
   })
 
-  it('accepts an object contract for readBody and skips nested handlers', () => {
+  it('accepts an object contract for c.req.json and skips nested handlers', () => {
     const scope = accepts('branches-readbody.ts')
     expect(scope.interfaces.map(typing => typing.name)).toEqual(['PostApiReadbodyObjectBody'])
   })

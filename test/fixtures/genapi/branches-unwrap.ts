@@ -1,14 +1,14 @@
-import { defineWebServer } from 'dsh-h3'
-import { defineEventHandler } from 'h3'
+/* eslint-disable ts/explicit-function-return-type -- fixtures exercise inferred native Hono response types */
+import type { Context } from 'hono'
+import { defineWebServer } from '../../../src/index'
 
-const handler = defineEventHandler(() => ({ ok: true }))
+const handler = (c: Context) => c.json(({ ok: true }))
 const parenthesized = (handler)
 const asserted = handler as typeof handler
 const satisfied = handler satisfies typeof handler
 const nonNull = handler!
 const angled = <typeof handler>handler
-const objectForm = defineEventHandler({ handler: () => ({ objectForm: true }) })
-
+const objectForm = (c: Context) => c.json(({ objectForm: true }))
 export const server = defineWebServer((app) => {
   app.get('/api/unwrap/parenthesized', parenthesized)
   app.get('/api/unwrap/asserted', asserted)

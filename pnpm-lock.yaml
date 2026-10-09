@@ -232,9 +232,12 @@ catalogs:
     '@genapi/shared':
       specifier: ^4.1.4
       version: 4.1.4
-    h3:
-      specifier: ^2.0.1
-      version: 2.0.1
+    '@hono/node-server':
+      specifier: ^2.1.4
+      version: 2.1.4
+    hono:
+      specifier: 4.13.13
+      version: 4.13.13
   inlined:
     '@antfu/utils':
       specifier: ^9.3.0
@@ -264,9 +267,12 @@ importers:
       '@deepseek-ai/cordis':
         specifier: ^4.0.4
         version: 4.0.4
-      h3:
+      '@hono/node-server':
         specifier: 'catalog:'
-        version: 2.0.1(crossws@0.4.12(srvx@0.12.7))
+        version: 2.1.4(hono@4.13.13)
+      hono:
+        specifier: 'catalog:'
+        version: 4.13.13
     devDependencies:
       '@antfu/eslint-config':
         specifier: catalog:cli
@@ -358,12 +364,12 @@ importers:
       '@deepseek-ai/cordis':
         specifier: ^4.0.4
         version: 4.0.4
-      dsh-h3:
+      dsh-hono:
         specifier: workspace:*
         version: link:..
-      h3:
+      hono:
         specifier: 'catalog:'
-        version: 2.0.1(crossws@0.4.12(srvx@0.12.7))
+        version: 4.13.13
     devDependencies:
       '@deepseek-ai/dsh-host-webserver':
         specifier: 'catalog:'
@@ -827,6 +833,12 @@ packages:
 
   '@henrygd/queue@1.2.0':
     resolution: {integrity: sha512-jW/BLSTpcvExDhqJGxtIPgGr2O0IFF8XUNDwEbfCfhrXT8a4xztQ9Lv6U/vbYzYC0xVWn+3zv6YnLUh3bEFUKA==}
+
+  '@hono/node-server@2.1.4':
+    resolution: {integrity: sha512-2g1qeHl4BduwDn6L8nkAvDrPUWPMlkQ//a5NhP/zIyaXKMjZNRV+cG9Csu+BiJFf6+68pqzjf4Hi5sJGKHuS1g==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      hono: ^4 || ^5.0.0-0
 
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
@@ -2533,6 +2545,10 @@ packages:
   hast-util-whitespace@3.0.0:
     resolution: {integrity: sha512-88JUN06ipLwsnv+dVn+OIYOvAuvBMy/Qoi6O7mQHxdPXpjy+Cd6xRkWwux7DKO+4sYILtLBRIKgsdpS2gQc7qw==}
 
+  hono@4.13.13:
+    resolution: {integrity: sha512-CQ46U0ZkAGmbT/4UxdzzGJpacP2IeKgY4a5/tOI9AABbpOMfK739wfDXmv1usCk+3RkKj1hQy4/fjhiwa2xlrA==}
+    engines: {node: '>=16.9.0'}
+
   hookable@6.1.1:
     resolution: {integrity: sha512-U9LYDy1CwhMCnprUfeAZWZGByVbhd54hwepegYTK7Pi5NvqEj63ifz5z+xukznehT7i6NIZRu89Ay1AZmRsLEQ==}
 
@@ -4093,6 +4109,10 @@ snapshots:
 
   '@henrygd/queue@1.2.0': {}
 
+  '@hono/node-server@2.1.4(hono@4.13.13)':
+    dependencies:
+      hono: 4.13.13
+
   '@humanfs/core@0.19.1': {}
 
   '@humanfs/node@0.16.6':
@@ -5518,6 +5538,8 @@ snapshots:
   hast-util-whitespace@3.0.0:
     dependencies:
       '@types/hast': 3.0.5
+
+  hono@4.13.13: {}
 
   hookable@6.1.1: {}
 

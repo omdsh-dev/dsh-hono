@@ -1,9 +1,12 @@
-import { defineWebServer } from 'dsh-h3'
-import { defineEventHandler } from 'h3'
+/* eslint-disable ts/explicit-function-return-type -- fixtures exercise inferred native Hono response types */
+import type { Context } from 'hono'
+import { defineWebServer } from '../../../src/index'
 
-const handler = defineEventHandler(() => ({ ok: true }))
-const onArguments: [string, typeof handler] = ['/api/on-short', handler]
-
+const handler = (c: Context) => c.json(({ ok: true }))
+const onArguments: [
+  string,
+    typeof handler,
+] = ['/api/on-short', handler]
 export const server = defineWebServer((app) => {
-  app.on('get', ...onArguments)
+  app.on('GET', ...onArguments)
 })

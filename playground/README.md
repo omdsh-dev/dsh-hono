@@ -1,132 +1,135 @@
-# DSH 基础插件示例 (Basic Example)
+# DSH 原生 Hono 插件示例 / Native Hono plugin example
 
-本示例展示了如何使用 [`dsh-h3`](../../README.md) 构建一个**纯宿主插件**。插件内的路由直接挂载并运行在宿主的 WebServer 上，无需启动独立的 HTTP 服务器或占用额外端口。
+使用 [dsh-hono](<../README.md>) 构建纯宿主插件：原生 Hono 路由运行在宿主已有 WebServer 上，不另起 HTTP 服务器、不监听额外端口。
 
----
+This example registers native Hono routes on the host's existing WebServer. It does not start another server or bind a port.
 
-## 📁 项目结构
+## 项目结构 / Layout
 
 ```text
-genapi.config.ts          # GenAPI 配置文件（静态读取服务器入口并生成客户端 API）
-cordis.patch.yml          # DSH Loader patch（向真实 Profile 注入编译后的插件）
-tsdown.config.ts          # 插件构建配置（仅打包宿主代码，保留外部依赖）
+genapi.config.ts          # 静态读取服务入口，生成客户端 / static client generation
+cordis.patch.yml          # 将编译后插件注入 DSH Profile / loader patch
+tsdown.config.ts          # 打包宿主代码，保留外部依赖 / host-only build
 src/
-├── index.ts              # 插件主入口（导出 inject 与 apply，托管服务激活与生命周期）
-├── host/
-│   └── server/
-│       ├── index.ts      # 服务器入口（通过 defineWebServer 注册路由与配置项）
-│       └── routes/       # 业务路由目录
-│           ├── health.ts # 健康检查路由（读取服务选项，返回运行时间）
-│           ├── server.ts # 宿主信息路由（读取 Context，返回监听端口）
-│           └── inspect.ts# 请求诊断路由（返回方法、路径和 Query）
-└── client/
-    └── apis/             # GenAPI 静态生成的客户端文件（提交至 Git，不可手动修改）
-        ├── index.ts      # 生成的请求 API 函数
-        └── index.type.ts # 生成的响应类型定义
-
+├── index.ts              # inject + apply + Cordis effect
+├── host/server/
+│   ├── index.ts          # defineWebServer + native Hono registrations
+│   └── routes/
+│       ├── health.ts     # Context options + uptime
+│       ├── server.ts     # Cordis Context + host port
+│       ├── inspect.ts    # method/path + typed string query
+│       └── echo.ts       # path parameter + validated typed query/JSON body
+└── client/apis/
+    ├── index.ts          # generated fetch request functions
+    └── index.type.ts     # generated contracts
 ```
 
-> 💡 **设计设计原则**：路由处理器统一采用 H3 的 `defineEventHandler`。业务文件仅关注处理逻辑，具体的路由注册与生命周期则交给服务入口与插件主入口集中管理。
+业务处理器接受 `hono` 的原生 Context，使用 `c.req`，通过 `c.json(...)` 返回有类型 JSON 响应。服务入口集中注册路由，插件入口通过 Cordis effect 管理生命周期。`getServerContext(c)` / `getServerOptions<Options>(c)` 获取本次激活的宿主依赖。
 
----
+Handlers accept native Hono Contexts and return typed JSON with `c.json(...)`. The service entry registers routes; the plugin entry manages activation/disposal through Cordis effects. Context helpers access the current activation's host dependencies.
 
-## 🛠️ 构建指南
+## 构建与生成 / Build and generate
 
-由于本示例通过 `workspace:*` 依赖主包，必须先在**仓库根目录**完成主包构建：
+本示例使用 `workspace:*` 主包，必须先构建库。从仓库根目录执行：
+
+The local workspace library must be built first. Run from the repository root:
 
 ```sh
-# 1. 安装项目依赖并构建主包
 pnpm install
 pnpm build
-
-# 2. 生成示例插件的客户端 API
-pnpm genapi
-
-# 3. 编译插件并进行类型检查
-pnpm build
-pnpm typecheck
-
+pnpm --filter dsh-plugin-playground genapi
+pnpm --filter dsh-plugin-playground typecheck
+pnpm --filter dsh-plugin-playground build
 ```
 
-> 📌 **产物说明**：插件的最终打包入口为 `./dist/index.mjs`。打包产物仅包含宿主端代码，不包含客户端请求代码。
+最终宿主插件入口为 `playground/dist/index.mjs`，不包含客户端代码。GenAPI 通过 [配置](<genapi.config.ts>) 从 `dsh-hono/genapi` 读取原生路由；生成过程不启动 DSH，也不执行处理器。
 
----
+The host-only output is `playground/dist/index.mjs`. [GenAPI config](<genapi.config.ts>) imports `dsh-hono/genapi`; generation never starts DSH or executes route handlers.
 
-## ⚡ 生成与调用客户端 API
+## 客户端调用 / Client calls
 
-### 1. 代码生成
+在同源客户端导入[生成的 API](<src/client/apis/index.ts>)：
 
-在仓库根目录或示例目录下执行生成命令（生成过程**不启动** DSH，亦**不执行**宿主路由代码）：
-
-```sh
-pnpm genapi
-# 或在当前示例目录下：
-pnpm genapi
-
-```
-
-### 2. 客户端调用示例
-
-在同源客户端（如前端应用）中调用：
+Import the [generated client](<src/client/apis/index.ts>) in a same-origin application:
 
 ```ts
-import { getApiHealth, getApiInspect, getApiServer } from './apis'
+import {
+  getApiEchoChannel,
+  getApiHealth,
+  getApiInspect,
+  getApiServer,
+  postApiEchoChannel,
+} from './apis'
 
-// 调用自动生成的客户端函数
 const health = await getApiHealth()
 const server = await getApiServer()
-const request = await getApiInspect({ query: { query: '1' } })
+const request = await getApiInspect({ query: '1' })
+const read = await getApiEchoChannel({ channel: 'demo' }, { pretty: 'true', limit: '2' })
+const write = await postApiEchoChannel(
+  { channel: 'demo' },
+  { message: 'hello', tags: ['example'], metadata: { source: 'client' } },
+  { pretty: 'false', limit: '3' },
+)
 
-console.log(health.uptimeMs, server.port, request.query)
+console.log(health.uptimeMs, server.port, request.query, read.limit, write.body.message)
 ```
 
-> 💡 **跨域/独立服务调用**：若在 Node.js 或异构客户端中调用，传入 `baseURL` 选项即可（例如 `{ baseURL: 'http://127.0.0.1:3080' }`）。
+参数依次为 path、body（若有）、query（若有）和可选原生 `RequestInit`。Query 使用真实 wire 字符串；echo 处理器在运行时校验并转换 `pretty`/`limit`，POST 校验 JSON 及 message/tags/metadata。类型声明不替代校验。
 
-### 3. 生成规则与维护
+Arguments are path, body (when present), query (when present), and optional native `RequestInit`. Query values are wire strings; echo validates/converts `pretty`/`limit` and validates JSON/body fields. Type declarations alone are not validation.
 
-* **支持的路由子集**：GenAPI 支持静态字符串和静态前缀下的简单 `:parameter` 路由。唯一的通配符例外是非根、完全静态前缀后的末尾 `/**`：本示例的 `/api/inspect/**` 仅生成请求固定端点 `/api/inspect` 的 `getApiInspect`，不会生成通配符或任意子路径客户端。根级 `/**`、带参数前缀后的 `/**`、单星号及中间位置的 `**` 均不支持。
-* **版本控制与检查**：生成的 API 文件需提交至 Git 仓库。构建/测试流程会校验生成的代码类型，而 ESLint 会自动忽略生成的代码以保留原始格式。
+生成 preset 使用相对 URL 与原生 fetch，不提供 `baseURL` 参数。独立 Node 客户端需自行配置适当的 origin/transport；不要将不存在的选项传入 API。
 
----
+The installed preset uses relative URLs and native fetch, not a `baseURL` option. Independent Node clients need an appropriate origin/transport configuration.
 
-## 🚀 运行与加载 (DSH)
+### 静态生成边界 / Static boundaries
 
-确保已安装 `dsh` CLI 工具，随后在**仓库根目录**启动 Web Profile：
+- `c.req.query() as Query`、`c.req.json<Body>()` 提供请求契约，`c.json(...)` 的 TypedResponse 提供响应契约。
+- 支持静态路径、静态前缀下简单 `:parameter`、原生 `app.on` 方法/路径数组、单处理器和链式调用。
+- 本示例 `/api/inspect/*` 仅生成固定 `/api/inspect` 客户端。子路径可以直接请求，但不由 GenAPI 枚举。
+- 根通配符、参数化通配符前缀、复杂正则、动态注册、子应用挂载、多处理器路由与非 JSON 响应不在生成子集内；运行时支持不表示可生成客户端。
+- 响应沿用聚合 JSON contract200，不是完整状态码映射；middleware 提前响应与 error hook 不生成独立契约。
+- 生成文件由生成器维护，不手动修改；重新生成后检查类型与 build。
+
+Generation extracts typed native query/JSON reads and JSON responses. It supports static/simple parameter routes, native method/path arrays and one handler per route. The terminal wildcard produces only the fixed base client. Dynamic registration, child mounts, multiple handlers and non-JSON responses are unsupported. Responses use the existing aggregated `200` contract, not a complete status map or independent middleware/error contracts. Regenerate clients instead of hand-editing them.
+
+## 加载到已有宿主 / Load into a host
+
+本次迁移不启动服务器。需要试用时，在你自己的宿主启动流程应用 [loader patch](<cordis.patch.yml>)。从 **playground 目录**运行以下命令，确保 patch 中的相对插件入口正确解析：
+
+This migration does not start a server. When testing in your own host, apply the [loader patch](<cordis.patch.yml>) from the **playground directory**, so its relative plugin entry resolves correctly:
 
 ```sh
 dsh web --patch ./cordis.patch.yml
 ```
 
-* **依赖注入保障**：`inject = ['webServer']` 确保仅在宿主 `webServer` 准备就绪后才激活插件。
-* **卸载机制**：当禁用或卸载该 Loader 条目时，Cordis Effect 将自动移除全部已注册路由。
-* ⚠️ **重载建议**：如果 DSH 已在运行，请携带 `--patch` 重启服务，避免在同一端口重复启动多份实例。
+若已有 DSH 运行，不要再启动第二份；在其正常重启流程应用 patch。`inject = ['webServer']` 等待宿主准备就绪，卸载 Loader 条目时 effect 自动移除路由。
 
----
+Do not start a second instance beside an existing DSH server; apply the patch during its normal restart. Injection waits for `webServer`, and unloading the loader entry disposes routes.
 
-## 🧪 试用验证
+## 请求验证 / Request checks
 
-启动后，可通过 `curl` 进行响应测试（端口请以实际宿主输出为准）：
+仅在已加载此插件的宿主上请求，端口以实际宿主配置为准：
+
+Run these requests only against a host already loading the plugin, using its configured port:
 
 ```sh
-# 1. 字符串路径精确匹配
-curl [http://127.0.0.1:3080/api/health](http://127.0.0.1:3080/api/health)
-# 响应: {"status":"ok","uptimeMs":...}
-
-# 2. H3 静态字符串路径 /api/server（宿主推导为 exact）
-curl [http://127.0.0.1:3080/api/server](http://127.0.0.1:3080/api/server)
-# 响应: {"port":3080}
-
-# 3. H3 通配符 /api/inspect/**（宿主推导为 prefix，子路径需直接请求，不由 GenAPI 枚举）
-curl '[http://127.0.0.1:3080/api/inspect/request?query=1](http://127.0.0.1:3080/api/inspect/request?query=1)'
-# 响应: {"method":"GET","path":"/api/inspect/request","query":{"query":"1"}}
-
-# 4. 未允许的方法默认返回 405
-curl -X POST [http://127.0.0.1:3080/api/health](http://127.0.0.1:3080/api/health)
-# 响应: 405 Method Not Allowed
+curl http://127.0.0.1:3080/api/health
+# {"status":"ok","uptimeMs":...}
+curl http://127.0.0.1:3080/api/server
+# {"port":3080}
+curl 'http://127.0.0.1:3080/api/inspect/request?query=1'
+# {"method":"GET","path":"/api/inspect/request","query":{"query":"1"}}
+curl 'http://127.0.0.1:3080/api/echo/demo?pretty=true&limit=2'
+# channel/method + pretty:true + limit:2 + raw string query
+curl -X POST http://127.0.0.1:3080/api/echo/demo -H 'Content-Type: application/json' -d '{"message":"hello"}'
+# channel/method + validated body + defaults pretty:false, limit:10
+curl -X POST http://127.0.0.1:3080/api/health
+# 405 Method Not Allowed
+curl 'http://127.0.0.1:3080/api/echo/demo?limit=-1'
+# 400 Bad Request
 ```
 
-> ⚠️ **注意事项**：
-> 1. 加载前请确认 `/api/*` 路由未被宿主或其他插件占用。如遇冲突，请在服务器入口修改路径并重新生成 API。
-> 2. 诊断端点未配置应用层鉴权与请求体限制；在扩展为生产级敏感接口前，请补充鉴权中间件与请求体大小限制。
+先确认路由未被宿主/其他插件占用；冲突时修改服务入口并重新生成 API。路径声明必须 canonical、无末尾斜杠（根 `/` 除外）；宿主 exact `/api/health` 不接收 `/api/health/`。示例未配置鉴权与 body 大小限制，扩展为敏感接口前请补充原生 Hono 中间件。
 
----
+Check route ownership before loading. Canonical declarations have no trailing slash except `/`; host exact `/api/health` does not dispatch `/api/health/`. The example has no authentication/body size limits; configure native middleware before exposing sensitive operations.

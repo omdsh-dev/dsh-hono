@@ -1,7 +1,7 @@
-import { getServerContext } from 'dsh-h3/utils'
-import { defineEventHandler } from 'h3'
+import type { Context, TypedResponse } from 'hono'
+import { getServerContext } from 'dsh-hono/utils'
 
-export default defineEventHandler((event) => {
-  const ctx = getServerContext(event)
-  return { port: ctx.webServer.port }
-})
+export default function serverInfo(c: Context): TypedResponse<{ port: number }, 200, 'json'> {
+  const ctx = getServerContext(c)
+  return c.json({ port: ctx.webServer.port })
+}
