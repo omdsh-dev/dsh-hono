@@ -7,7 +7,7 @@
 [![coverage][coverage-src]][coverage-href]
 [![License][license-src]][license-href]
 
-⚡️ **dsh-hono** 面向插件作者，为 DeepSeek Harness 插件提供原生 Hono 路由服务，通过 Cordis 管理注册与卸载。
+🔥 **dsh-hono** 为 DeepSeek Harness 插件 host 集成 [Hono](<https://hono.dev/>)——轻量、快速、基于 Web 标准的 Web 框架，提供原生路由与丰富的中间件，通过 Cordis 管理注册与卸载。
 
 中文 · [English](<README.en.md>)
 

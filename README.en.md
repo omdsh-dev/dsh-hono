@@ -7,7 +7,7 @@
 [![coverage][coverage-src]][coverage-href]
 [![License][license-src]][license-href]
 
-⚡️ **dsh-hono** is for plugin authors: it provides native Hono route services for DeepSeek Harness plugins, with registration and disposal managed by Cordis.
+🔥 **dsh-hono** integrates [Hono](<https://hono.dev/>) into the DeepSeek Harness plugin host. Hono is a fast, lightweight Web framework built on Web Standards, with native routing and a rich middleware ecosystem. Cordis manages registration and disposal.
 
 [中文](<README.md>) · English
 
